@@ -1,10 +1,13 @@
 import streamlit as st
 import os
+import json
+import re
 from openai import OpenAI
 import pdfplumber
 import plotly.express as px
 import pandas as pd
 from market_scraper import get_market_requirements
+from database import save_analysis, get_analysis_history
 
 # Konfiguracja
 st.set_page_config(page_title="Career Pathfinder AI", page_icon="🎯", layout="wide")
@@ -46,6 +49,30 @@ def extract_skills_with_ai(text):
         return response.choices[0].message.content
     except Exception as e:
         return f"Błąd ekstrakcji: {e}"
+
+# ---- NOWA FUNKCJA: Wyodrębnianie ustrukturyzowanych danych z raportu AI ----
+def parse_ai_report(ai_content):
+    """
+    Raport AI kończy się dodatkowym blokiem JSON (###JSON_START###...###JSON_END###)
+    z gotowością % i listą braków technologicznych — potrzebnym do zapisu w historii.
+    Zwraca (tekst_do_wyswietlenia, readiness_score, missing_skills), gdzie tekst_do_wyswietlenia
+    ma już wycięty ten techniczny blok, żeby użytkownik widział tylko czytelną analizę.
+    """
+    match = re.search(r"###JSON_START###(.*?)###JSON_END###", ai_content, re.DOTALL)
+    if not match:
+        return ai_content.strip(), None, []
+
+    display_text = ai_content[: match.start()].strip()
+    try:
+        structured = json.loads(match.group(1).strip())
+        readiness_score = structured.get("readiness_score")
+        missing_skills = structured.get("missing_skills") or []
+        if not isinstance(missing_skills, list):
+            missing_skills = []
+    except (json.JSONDecodeError, AttributeError):
+        readiness_score, missing_skills = None, []
+
+    return display_text, readiness_score, missing_skills
 
 # --- INTERFEJS (FRONT-END) ---
 st.title("🎯 Career Pathfinder AI")
@@ -98,6 +125,13 @@ if analizuj_btn:
             3. Gotowość (np. "Gotowość na 60% - Brakuje kluczowego narzędzia X")
             
             ZASADA: Zawsze pisz w nawiasach procent z wymagań rynku przy każdej umiejętności (np. Power BI (70%)).
+
+            Na SAMYM KOŃCU odpowiedzi, PO całej analizie tekstowej, dodaj DOKŁADNIE jeden
+            blok w poniższym formacie (musi być poprawnym JSON-em, bez komentarzy):
+            ###JSON_START###
+            {{"readiness_score": <liczba_calkowita_0_100>, "missing_skills": ["<technologia_1>", "<technologia_2>"]}}
+            ###JSON_END###
+            Blok ten musi zawierać WSZYSTKIE kluczowe brakujące technologie wypisane w sekcji "Luka".
             """
             
             response = client.chat.completions.create(
@@ -105,6 +139,21 @@ if analizuj_btn:
                 messages=[{"role": "user", "content": final_prompt}],
                 temperature=0.1 
             )
+
+            # Wyciągamy z odpowiedzi czysty tekst dla użytkownika + dane do historii (po cichu, w tle)
+            display_report, readiness_score, missing_skills = parse_ai_report(
+                response.choices[0].message.content
+            )
+
+            try:
+                save_analysis(
+                    job_title=stanowisko,
+                    readiness_score=readiness_score,
+                    gaps=missing_skills,
+                )
+            except Exception:
+                # Historia to funkcja "nice to have" - awaria bazy nie może wywalić raportu użytkownikowi.
+                pass
             
             # --- RYSOWANIE WYNIKÓW ---
             st.success("Analiza zakończona! ✅")
@@ -112,7 +161,7 @@ if analizuj_btn:
             
             col1, col2 = st.columns([1, 1])
             with col1:
-                st.info(response.choices[0].message.content)
+                st.info(display_report)
             
             with col2:
                 st.markdown("### 📈 Wymagania Rynku")
@@ -133,3 +182,25 @@ if analizuj_btn:
                 # Opcjonalny przycisk deweloperski do podejrzenia, co wyciągnęliśmy z PDF
                 with st.expander("👀 Podejrzyj surowe kompetencje wyciągnięte z Twoich PDF"):
                     st.write(uni_skills)
+
+# --- HISTORIA ANALIZ (sidebar) ---
+# Umieszczone na końcu skryptu (mimo że wizualnie renderuje się w sidebarze),
+# żeby po kliknięciu "Generuj Raport" od razu pokazywał również najświeższy,
+# właśnie zapisany rekord bez potrzeby dodatkowego przeładowania strony.
+with st.sidebar:
+    st.markdown("---")
+    with st.expander("📜 Historia Analiz"):
+        history = get_analysis_history()
+        if not history:
+            st.caption("Brak zapisanych analiz. Wygeneruj pierwszy raport, aby zobaczyć go tutaj!")
+        else:
+            history_df = pd.DataFrame([
+                {
+                    "Data": entry["timestamp"].strftime("%Y-%m-%d %H:%M"),
+                    "Stanowisko": entry["job_title"],
+                    "Gotowość": f"{entry['readiness_score']}%" if entry["readiness_score"] is not None else "—",
+                    "Braki technologiczne": ", ".join(entry["gaps"]) if entry["gaps"] else "—",
+                }
+                for entry in history
+            ])
+            st.dataframe(history_df, use_container_width=True, hide_index=True)
