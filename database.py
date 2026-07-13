@@ -117,6 +117,44 @@ def get_analysis_history(limit=50):
         session.close()
 
 
+def get_latest_gaps(job_title):
+    """
+    Pobiera najnowszy (po timestampie) zapisany rekord analizy dla danego stanowiska
+    i zwraca jego listę braków technologicznych.
+
+    To fundament "Generatora Harmonogramu Nauki" — pozwala mu bazować na
+    najświeższym raporcie gotowości bez konieczności ponownej analizy PDF-ów.
+
+    Args:
+        job_title: nazwa stanowiska, dla którego szukamy ostatniej analizy.
+
+    Returns:
+        Lista stringów z brakującymi technologiami. Pusta lista, jeśli dla
+        tego stanowiska nie ma jeszcze żadnej zapisanej analizy albo gdy
+        zapisany JSON jest uszkodzony/pusty.
+    """
+    session = SessionLocal()
+    try:
+        record = (
+            session.query(AnalysisHistory)
+            .filter(AnalysisHistory.job_title == job_title)
+            .order_by(AnalysisHistory.timestamp.desc())
+            .first()
+        )
+
+        if record is None or not record.gaps_json:
+            return []
+
+        try:
+            gaps = json.loads(record.gaps_json)
+        except (json.JSONDecodeError, TypeError):
+            return []
+
+        return gaps if isinstance(gaps, list) else []
+    finally:
+        session.close()
+
+
 # Tabela musi istnieć zanim ktokolwiek zaimportuje ten moduł i zacznie zapisywać/czytać.
 init_db()
 
@@ -136,3 +174,6 @@ if __name__ == "__main__":
     for entry in history:
         print(f"   [{entry['id']}] {entry['timestamp']} | {entry['job_title']} | "
               f"{entry['readiness_score']}% | braki: {entry['gaps']}")
+
+    latest_gaps = get_latest_gaps("Python Developer")
+    print(f"🎯 Najnowsze braki dla 'Python Developer': {latest_gaps}")
