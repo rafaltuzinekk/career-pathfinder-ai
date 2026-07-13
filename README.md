@@ -1,27 +1,33 @@
 # 🎯 Career Pathfinder AI
 
-> Krótkie, chwytliwe zdanie o projekcie (np. AI-powered system that bridges the gap between university syllabuses and real-time IT job market requirements).
+> An AI-powered system that bridges the gap between rigorous university syllabuses and real-time IT job market requirements.
 
-## 🚀 O projekcie
-Napisz tutaj 2-3 zdania od siebie. Dlaczego to stworzyłeś? Jaki problem to rozwiązuje? (np. że rynek IT zmienia się tak szybko, że uczelnie nie nadążają, a to narzędzie pozwala kandydatom dokładnie namierzyć ich braki technologiczne).
+## 🚀 The Motivation
+With a strong academic background in Computer Science and Econometrics, I realized there is often a disconnect between theoretical university coursework (e.g., advanced mathematics, statistics, relational database theory) and the specific, fast-changing tech stacks demanded by the job market. 
 
-## ✨ Główne funkcjonalności
-* **Live Market Scraping:** (opisz krótko, że pobierasz dane na żywo przez Playwright)
-* **AI Readiness Analysis:** (że model LLM czyta PDF-y i wyciąga kompetencje)
-* **Smart Study Planner:** (o tym, że generujesz konkretne, rozłożone w czasie plany nauki)
-* **Persistence Memory:** (że trzymasz historię wyników w lokalnej bazie SQLite)
+**Career Pathfinder AI** solves this by analyzing real university syllabuses (PDFs), scraping current job postings, and using Large Language Models to generate actionable, personalized study roadmaps.
+
+## ✨ Core Features
+* **📡 Live Market Scraping:** Utilizes Playwright to dynamically scrape and aggregate real-time skill requirements from IT job boards.
+* **🧠 AI Readiness Analysis:** Extracts raw academic competencies from uploaded PDF syllabuses (using `pdfplumber`) and maps them against market data via OpenAI's structured extraction.
+* **📅 Actionable AI Study Planner:** Transforms identified skill gaps into rigorous, deadline-driven study schedules formatted as daily/weekly tasks.
+* **💾 Persistence Memory:** Silently logs analysis history and skill gaps using SQLite, allowing users to track their learning progress over time.
+* **⚡ Seamless State Management:** Implements robust `st.session_state` logic in Streamlit to prevent UI "amnesia" and ensure smooth navigation between reports and study planners.
+
+## 🏗️ Architecture & Flow
+1. **Data Ingestion:** User uploads academic PDFs. The system extracts text and identifies core academic fundamentals.
+2. **Market Aggregation:** A headless browser scrapes current tech requirements for the selected role.
+3. **AI Processing:** OpenAI compares the academic baseline with market demands, categorizing skills and identifying concrete gaps.
+4. **Actionable Output:** The system saves the state to SQLite and generates a customized, deadline-oriented learning schedule.
 
 ## 🛠️ Tech Stack
-* **Język:** Python
+* **Language:** Python 3
 * **Frontend:** Streamlit
-* **Baza Danych:** SQLite & SQLAlchemy
-* **Skrobanie Danych:** Playwright, BeautifulSoup
-* **AI & LLM:** OpenAI API
-* **Analiza PDF:** pdfplumber
+* **Database:** SQLite & SQLAlchemy
+* **Web Scraping:** Playwright, BeautifulSoup4
+* **AI & NLP:** OpenAI API (GPT models)
+* **Data Processing:** Pandas, pdfplumber
 
-## 💻 Jak uruchomić projekt lokalnie
-1. Sklonuj repozytorium.
-2. Utwórz wirtualne środowisko (`python -m venv venv`) i aktywuj je.
-3. Zainstaluj zależności (jeśli dorobimy plik `requirements.txt`).
-4. Dodaj plik `.env` z kluczem `OPENAI_API_KEY`.
-5. Uruchom: `streamlit run app.py`
+## 🚧 Engineering Challenges Overcome
+* **Dirty Data & Category Mapping Anomalies:** Encountered an issue where Business Analysis tools (like UML/BPMN) were polluting Data Analyst tech stacks due to broad job board categorization. Solved by implementing a strict, hardcoded routing dictionary that isolates core data engineering roles from business-centric roles.
+* **Streamlit Lifecycle Amnesia:** Streamlit's default behavior resets variables upon button clicks, causing generated AI reports to disappear when switching tabs. Solved by engineering a persistent `session_state` caching mechanism with strict `on_change` callbacks for context clearing.
