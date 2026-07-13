@@ -19,9 +19,23 @@ Strategia:
    nie wywaliło.
 """
 
+import asyncio
 import re
 import sys
 from collections import Counter
+
+# --- PATCH: Playwright (sync API) + Streamlit na Windowsie ---
+# Streamlit uruchamia nasz skrypt w dedykowanym wątku roboczym (ScriptRunner),
+# a nie w wątku głównym procesu. Domyślna polityka asyncio na Windowsie dla
+# nowych event loopów w takim kontekście to `SelectorEventLoop`, który NIE
+# potrafi tworzyć podprocesów (a Playwright właśnie w podprocesie odpala
+# przeglądarkę). Efekt: `NotImplementedError` przy starcie `sync_playwright()`.
+# `WindowsProactorEventLoopPolicy` wspiera podprocesy i musi zostać ustawiona
+# GLOBALNIE (polityka jest współdzielona przez wszystkie wątki procesu),
+# zanim jakikolwiek event loop zostanie utworzony — dlatego robimy to tu,
+# na samym początku modułu, przed importem Playwrighta.
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
 from playwright.sync_api import sync_playwright
 
@@ -77,20 +91,28 @@ CATEGORY_MAP = {
 DEFAULT_CATEGORY = "python"
 
 # Dane referencyjne używane wyłącznie w razie totalnej awarii sieci/strony.
-FALLBACK_MOCKS = {
-    "Junior Data Analyst": {
-        "SQL": 48, "PYTHON": 42, "EXCEL": 40, "STATYSTYKA": 38, "POWER BI": 35, "TABLEAU": 20
+# WAŻNE: kluczem jest KATEGORIA JustJoin.it (ta sama, którą wylicza
+# `_resolve_category()` dla żywego scrapingu), a nie surowy, dowolny string
+# `job_title`. Dzięki temu fallback nigdy nie "pomyli" roli — np. przy
+# literówce/wielkości liter w `job_title` nie dostaniemy po cichu skilli
+# Data Analysta (Excel/Power BI) dla Python Developera, tylko zawsze
+# wylądujemy w sensownym, dopasowanym do kategorii zestawie.
+FALLBACK_SKILLS_BY_CATEGORY = {
+    "analytics": {  # Junior Data Analyst / Business Analyst
+        "SQL": 45, "EXCEL": 42, "POWER BI": 35, "BPMN": 30, "JIRA": 40, "STATYSTYKA": 28
     },
-    "Data Scientist": {
+    "ai": {  # Data Scientist / Machine Learning
         "PYTHON": 49, "MACHINE LEARNING": 45, "SQL": 40, "STATYSTYKA": 42, "R": 25, "TENSORFLOW": 15
     },
-    "Python Developer": {
+    "python": {  # Python Developer / Backend
         "PYTHON": 50, "SQL": 38, "DJANGO": 35, "FASTAPI": 30, "DOCKER": 40, "GIT": 45
     },
-    "Business Analyst": {
-        "SQL": 40, "EXCEL": 45, "POWER BI": 35, "BPMN": 30, "JIRA": 42, "KOMUNIKATYWNOŚĆ": 48
+    "data": {  # Data Engineer i inne role "data-owe"
+        "SQL": 44, "PYTHON": 40, "ETL": 30, "AIRFLOW": 22, "SPARK": 20, "POWER BI": 18
     },
 }
+# Neutralny zestaw, gdy kategoria w ogóle nie ma dedykowanego mocka.
+FALLBACK_DEFAULT_CATEGORY = "python"
 
 # Regex wyłuskujący z surowego HTML listę technologii wstrzykniętą przez Next.js,
 # np.: \"requiredSkills\":[\"Python\",\"Docker\",\"SQL\"]
@@ -141,8 +163,11 @@ def _extract_skills_from_html(html, max_offers=MAX_OFFERS):
 
 
 def _get_fallback_data(job_title):
-    selected_mock = FALLBACK_MOCKS.get(job_title, FALLBACK_MOCKS["Junior Data Analyst"])
-    print("⚠️ Graceful Degradation: korzystam z ustabilizowanych danych referencyjnych.")
+    category = _resolve_category(job_title)
+    selected_mock = FALLBACK_SKILLS_BY_CATEGORY.get(
+        category, FALLBACK_SKILLS_BY_CATEGORY[FALLBACK_DEFAULT_CATEGORY]
+    )
+    print(f"⚠️ Graceful Degradation: korzystam z danych referencyjnych dla kategorii '{category}'.")
     return {
         "job_title": job_title,
         "total_offers_analyzed": 50,
