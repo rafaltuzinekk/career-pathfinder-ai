@@ -233,23 +233,51 @@ with tab_raport:
 
                 # 4. Ostateczna analiza (Silnik AI)
                 final_prompt = f"""
-                Jesteś Senior HR. Rekrutujesz na stanowisko: {stanowisko}.
-                Wymagania rynku: {market_data}
-                Profil kandydata wyciągnięty z wgranych plików: {uni_skills}
+                Jesteś Senior Inżynierem IT i analitycznym mentorem technicznym z wieloletnim doświadczeniem
+                w rekrutacji i wdrażaniu kandydatów na stanowisko: {stanowisko}. Rozmawiasz z kandydatem, który
+                dopiero wchodzi na rynek - Twoim celem NIE jest sucha lista "plusy/minusy", a merytoryczny,
+                pogłębiony feedback, jakiego udzieliłby prawdziwy senior podczas mentoringu 1:1.
 
-                Zrób bezwzględną analizę:
-                1. Mocne Strony (co z wymagań ma odhaczone)
-                2. Luka (czego kategorycznie brakuje)
-                3. Gotowość (np. "Gotowość na 60% - Brakuje kluczowego narzędzia X")
+                KONTEKST:
+                - Żywe wymagania rynku pracy (z aktualnych ofert): {market_data}
+                - Kompetencje/wiedza wyciągnięte z sylabusów akademickich kandydata: {uni_skills}
 
-                ZASADA: Zawsze pisz w nawiasach procent z wymagań rynku przy każdej umiejętności (np. Power BI (70%)).
+                Zbuduj raport wg DOKŁADNIE tej struktury (pisz po polsku, tonem profesjonalnego,
+                analitycznego mentora IT - konkretnie, bez lania wody):
+
+                ## 1. Analiza kompetencji wg kategorii technologicznych
+                Pogrupuj ocenę kandydata w sensowne, adekwatne do stanowiska {stanowisko} kategorie
+                technologiczne (np. Programowanie, Bazy Danych, Inżynieria Danych/Chmura, Analiza i Wizualizacja
+                Danych, Narzędzia i Procesy - wybierz i nazwij kategorie sam, zależnie od tego, co faktycznie
+                wynika z wymagań rynku). W ramach każdej kategorii oceń pokrycie kompetencji kandydata.
+
+                ## 2. Co wynosisz ze studiów
+                Wyjaśnij WPROST, jak akademickie fundamenty kandydata (np. algorytmy i struktury danych,
+                matematyka/statystyka, relacyjne bazy danych, inżynieria oprogramowania - użyj tego, co realnie
+                wynika z {uni_skills}) PRZEKŁADAJĄ SIĘ na pracę na stanowisku {stanowisko}. To ma być argument,
+                dlaczego akademicka baza kandydata ma realną wartość rynkową - nie zwykła lista przedmiotów.
+
+                ## 3. Co musisz doszlifować
+                Wskaż KONKRETNE, rynkowe narzędzia i technologie, których kandydatowi brakuje (na podstawie
+                różnicy między wymaganiami rynku a profilem kandydata), a przy KAŻDEJ z nich w 1-2 zdaniach
+                wyjaśnij, DO CZEGO służy w praktyce na stanowisku {stanowisko} (np. "Snowflake - chmurowa
+                platforma do hurtowni danych, używana do..."; "Airflow/ETL - orkiestracja przepływów danych,
+                niezbędna do..."). To ma być konkretny plan nauki, nie tylko nazwy narzędzi.
+
+                ## 4. Werdykt gotowości
+                Jednym zdecydowanym akapitem podsumuj ogólną gotowość kandydata do podjęcia pracy na
+                stanowisku {stanowisko} (np. "Gotowość na 60% - Brakuje kluczowego narzędzia X").
+
+                ZASADA: W sekcjach 1, 3 i 4 zawsze pisz w nawiasach procent z wymagań rynku przy KAŻDEJ
+                wymienionej umiejętności (np. Power BI (70%)).
 
                 Na SAMYM KOŃCU odpowiedzi, PO całej analizie tekstowej, dodaj DOKŁADNIE jeden
                 blok w poniższym formacie (musi być poprawnym JSON-em, bez komentarzy):
                 ###JSON_START###
                 {{"readiness_score": <liczba_calkowita_0_100>, "missing_skills": ["<technologia_1>", "<technologia_2>"]}}
                 ###JSON_END###
-                Blok ten musi zawierać WSZYSTKIE kluczowe brakujące technologie wypisane w sekcji "Luka".
+                Blok ten musi zawierać WSZYSTKIE kluczowe brakujące technologie wypisane w sekcji
+                "Co musisz doszlifować".
                 """
 
                 response = client.chat.completions.create(

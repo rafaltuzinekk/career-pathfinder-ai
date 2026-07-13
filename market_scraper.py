@@ -60,7 +60,7 @@ CATEGORY_MAP = {
     "data scientist": "ai",
     "machine learning": "ai",
     "data engineer": "data",
-    "data analyst": "analytics",
+    "data analyst": "data",
     "business analyst": "analytics",
     "business intelligence": "analytics",
     "python": "python",
