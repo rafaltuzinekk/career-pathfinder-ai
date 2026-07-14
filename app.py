@@ -8,6 +8,7 @@ import pdfplumber
 import plotly.express as px
 import pandas as pd
 from market_scraper import get_market_requirements
+from solidjobs_client import get_market_requirements_solidjobs
 from database import save_analysis, get_analysis_history, get_latest_gaps
 
 # Konfiguracja
@@ -194,7 +195,16 @@ with st.sidebar:
         # bez tego użytkownik zobaczyłby "Raport dla: Python Developer" mimo wybrania Data Scientist.
         on_change=_clear_generated_state,
     )
-    
+
+    # Źródło żywych danych rynkowych. Zmiana źródła unieważnia policzony wcześniej
+    # raport/plan (są dla KONKRETNEGO źródła), więc czyścimy stan jak przy zmianie roli.
+    st.radio(
+        "🌐 Źródło danych rynkowych",
+        ["SolidJobs (API)", "JustJoin.it (scraper)"],
+        key="market_source",
+        on_change=_clear_generated_state,
+    )
+
     st.markdown("---")
     st.subheader("📄 Wgraj Sylabusy (PDF)")
     # Odbieramy listę plików
@@ -228,8 +238,12 @@ with tab_raport:
                 uni_skills = extract_skills_with_ai(raw_text)
 
             with st.spinner(f"Trwa skanowanie rynku i zderzenie kompetencji dla: {stanowisko}..."):
-                # 3. Pobranie żywych danych o rynku dla WYBRANEGO stanowiska
-                market_data = get_market_requirements(stanowisko)
+                # 3. Pobranie żywych danych o rynku dla WYBRANEGO stanowiska,
+                #    z wybranego przez użytkownika źródła.
+                if st.session_state["market_source"] == "SolidJobs (API)":
+                    market_data = get_market_requirements_solidjobs(stanowisko)
+                else:
+                    market_data = get_market_requirements(stanowisko)
 
                 # 4. Ostateczna analiza (Silnik AI)
                 final_prompt = f"""
