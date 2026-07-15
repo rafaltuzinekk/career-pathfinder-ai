@@ -37,7 +37,10 @@ from collections import Counter
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
-from playwright.sync_api import sync_playwright
+# UWAGA: Playwright importujemy LENIWIE, wewnątrz `_fetch_raw_html`, a nie na
+# poziomie modułu. Dzięki temu inne moduły (np. solidjobs_client) mogą korzystać
+# z lekkich funkcji tego pliku — np. `_get_fallback_data` jako wspólnego fallbacku
+# — bez wymuszania instalacji przeglądarki Playwright.
 
 # Windows/PowerShell bywa skonfigurowane z domyślnym kodowaniem konsoli (np. cp1250),
 # które nie obsługuje emoji używanych w logach — wymuszamy UTF-8, żeby skrypt
@@ -130,6 +133,8 @@ def _resolve_category(job_title):
 
 def _fetch_raw_html(url):
     """Otwiera stronę w headless Chromium, udając realnego użytkownika, i zwraca surowy HTML."""
+    from playwright.sync_api import sync_playwright
+
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         context = browser.new_context(
