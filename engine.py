@@ -1,11 +1,35 @@
 import os
 from dotenv import load_dotenv
+import pdfplumber
 from openai import OpenAI
 from market_scraper import get_market_requirements
 
 # 1. Inicjalizacja
 load_dotenv()
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+def extract_text_from_pdf(file_path):
+    """Wyciąga czysty tekst z pliku PDF (strona po stronie) za pomocą pdfplumber."""
+    extracted_text = ""
+    try:
+        with pdfplumber.open(file_path) as pdf:
+            for page in pdf.pages:
+                text = page.extract_text()
+                if text:
+                    extracted_text += text + "\n"
+        return extracted_text
+    except Exception as e:
+        print(f"❌ Błąd odczytu {file_path}: {e}")
+        return ""
+
+def extract_text_from_txt(file_path):
+    """Wczytuje zawartość pliku tekstowego (.txt) jako surowy tekst."""
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            return f.read()
+    except Exception as e:
+        print(f"❌ Błąd odczytu {file_path}: {e}")
+        return ""
 
 def load_university_skills():
     try:
