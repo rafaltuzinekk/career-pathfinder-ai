@@ -18,6 +18,72 @@ load_dotenv()
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
+# ---- DANE DEMO: przykładowy wyciąg z sylabusa (kierunek Informatyka i Ekonometria) ----
+# Pozwala rekruterom przetestować aplikację "jednym kliknięciem", bez konieczności
+# przygotowywania i wgrywania własnych plików PDF.
+DEMO_SYLLABUS_TEXT = """
+KARTA PRZEDMIOTU: Podstawy Programowania w Pythonie
+Kierunek: Informatyka i Ekonometria | Rok: I | Semestr: 1 | Punkty ECTS: 6
+Forma zajęć: wykład 30h, laboratorium 30h
+Treści programowe:
+Wprowadzenie do środowiska Python (interpreter, PEP8, Jupyter Notebook). Typy danych, zmienne,
+operatory. Struktury kontrolne (if/elif/else, while, for). Struktury danych: listy, słowniki, zbiory,
+tuple oraz operacje na nich (list comprehension). Funkcje, argumenty, zakres zmiennych, funkcje
+lambda. Programowanie obiektowe: klasy, dziedziczenie, polimorfizm, enkapsulacja. Obsługa wyjątków
+(try/except/finally). Praca z plikami (odczyt/zapis CSV, JSON). Wprowadzenie do bibliotek NumPy
+i Pandas: tablice, wektoryzacja, DataFrame, indeksowanie, agregacje, łączenie zbiorów danych.
+Podstawy wizualizacji danych z użyciem Matplotlib i Seaborn. Wersjonowanie kodu z użyciem Git
+i GitHub. Testowanie kodu (unittest, pytest) oraz dobre praktyki programistyczne (czysty kod,
+dokumentacja, docstringi).
+Efekty uczenia się: Student samodzielnie implementuje algorytmy w Pythonie, przetwarza dane
+tabelaryczne z użyciem Pandas oraz korzysta z systemu kontroli wersji Git.
+
+KARTA PRZEDMIOTU: Bazy Danych SQL
+Kierunek: Informatyka i Ekonometria | Rok: I | Semestr: 2 | Punkty ECTS: 5
+Forma zajęć: wykład 15h, laboratorium 30h
+Treści programowe:
+Modele danych: relacyjny, hierarchiczny, sieciowy. Projektowanie schematu relacyjnej bazy danych,
+normalizacja (1NF, 2NF, 3NF, BCNF), diagramy ERD. Język SQL: DDL (CREATE, ALTER, DROP), DML
+(SELECT, INSERT, UPDATE, DELETE), operacje JOIN (INNER, LEFT, RIGHT, FULL), podzapytania,
+funkcje agregujące (COUNT, SUM, AVG, GROUP BY, HAVING), widoki (VIEW), indeksy i ich wpływ na
+wydajność zapytań. Transakcje i własności ACID, poziomy izolacji transakcji. Wprowadzenie do
+systemów zarządzania bazami danych: PostgreSQL, MySQL. Podstawy administracji bazą danych,
+uprawnienia użytkowników, kopie zapasowe. Wprowadzenie do NoSQL (MongoDB) jako uzupełnienie
+podejścia relacyjnego. Optymalizacja zapytań i analiza planów wykonania (EXPLAIN).
+Efekty uczenia się: Student projektuje znormalizowany schemat bazy danych oraz pisze złożone
+zapytania SQL (JOIN, podzapytania, agregacje) do analizy i raportowania danych.
+
+KARTA PRZEDMIOTU: Statystyka Matematyczna
+Kierunek: Informatyka i Ekonometria | Rok: II | Semestr: 3 | Punkty ECTS: 6
+Forma zajęć: wykład 30h, ćwiczenia 30h
+Treści programowe:
+Zmienne losowe jednowymiarowe i wielowymiarowe, rozkłady prawdopodobieństwa (dwumianowy,
+Poissona, normalny, t-Studenta, chi-kwadrat, F-Snedecora). Estymacja punktowa i przedziałowa
+parametrów populacji. Testowanie hipotez statystycznych: testy parametryczne i nieparametryczne,
+błąd I i II rodzaju, poziom istotności, moc testu. Analiza wariancji (ANOVA). Korelacja i regresja
+liniowa - estymacja metodą najmniejszych kwadratów (MNK), współczynnik determinacji R^2, analiza
+reszt. Wprowadzenie do wnioskowania bayesowskiego. Wykorzystanie oprogramowania statystycznego
+(R, Python - biblioteki SciPy i StatsModels) do analizy danych empirycznych. Symulacje Monte Carlo
+jako metoda weryfikacji własności estymatorów.
+Efekty uczenia się: Student stawia i weryfikuje hipotezy statystyczne, buduje modele regresji
+liniowej oraz interpretuje wyniki analiz statystycznych w kontekście danych ekonomicznych.
+
+KARTA PRZEDMIOTU: Ekonometria Dynamiczna
+Kierunek: Informatyka i Ekonometria | Rok: III | Semestr: 5 | Punkty ECTS: 6
+Forma zajęć: wykład 30h, laboratorium komputerowe 30h
+Treści programowe:
+Szeregi czasowe: stacjonarność, autokorelacja, funkcje ACF/PACF. Modele autoregresyjne (AR),
+średniej ruchomej (MA), mieszane ARMA/ARIMA oraz sezonowe SARIMA. Testowanie stacjonarności
+(test Dickeya-Fullera, KPSS). Modele wektorowej autoregresji (VAR) oraz analiza przyczynowości
+w sensie Grangera. Modele korekty błędem (ECM) oraz kointegracja szeregów czasowych. Modele
+warunkowej heteroskedastyczności (ARCH/GARCH) do prognozowania zmienności finansowej. Prognozowanie
+ekonometryczne i ocena jakości prognoz (MAPE, RMSE). Zastosowanie języka Python (biblioteki
+StatsModels, pmdarima) oraz R do estymacji i weryfikacji modeli dynamicznych na rzeczywistych
+danych makroekonomicznych i finansowych.
+Efekty uczenia się: Student buduje, estymuje i weryfikuje dynamiczne modele ekonometryczne
+(ARIMA, VAR, GARCH) oraz wykorzystuje je do prognozowania zjawisk gospodarczych.
+""".strip()
+
 # ---- NOWA FUNKCJA: Przetwarzanie plików w locie ----
 def process_uploaded_pdfs(uploaded_files):
     all_text = ""
@@ -181,6 +247,36 @@ def _clear_generated_state():
     _clear_report_state()
     st.session_state.pop("study_plan_data", None)
 
+
+def _clear_demo_state():
+    """
+    Usuwa z session_state przykładowy tekst sylabusa wczytany przyciskiem Demo.
+
+    Wywoływane, gdy użytkownik zaczyna wgrywać własne pliki PDF — od tego
+    momentu to one mają być źródłem danych, a nie tekst demo.
+    """
+    st.session_state.pop("raw_text", None)
+
+
+def _on_pdf_upload_change():
+    """Reaguje na wgranie nowego zestawu PDF-ów: unieważnia stary raport
+    i porzuca ewentualny tekst demo, bo to wgrane pliki mają teraz priorytet."""
+    _clear_report_state()
+    _clear_demo_state()
+
+
+def _use_demo_syllabus():
+    """
+    Wypełnia session_state przykładowym, z góry przygotowanym tekstem sylabusa
+    (patrz `DEMO_SYLLABUS_TEXT`), żeby rekruter mógł przetestować aplikację
+    bez wgrywania własnych plików PDF.
+
+    Tak jak przy wgraniu nowych plików PDF, czyścimy stary raport gotowości —
+    inaczej użytkownik zobaczyłby raport policzony dla poprzednich danych.
+    """
+    st.session_state["raw_text"] = DEMO_SYLLABUS_TEXT
+    _clear_report_state()
+
 # --- INTERFEJS (FRONT-END) ---
 st.title("🎯 Career Pathfinder AI")
 st.markdown("Zderz swoją wiedzę ze studiów z realnymi wymaganiami rynku pracy.")
@@ -214,10 +310,20 @@ with st.sidebar:
         accept_multiple_files=True,
         key="pdf_uploader",
         # Nowy zestaw PDF-ów = nowy profil kandydata, więc stary raport (policzony
-        # na podstawie poprzednich plików) trzeba wymusić do przeliczenia.
-        on_change=_clear_report_state,
+        # na podstawie poprzednich plików) trzeba wymusić do przeliczenia, a ewentualny
+        # tekst demo trzeba porzucić — od teraz priorytet mają wgrane pliki.
+        on_change=_on_pdf_upload_change,
     )
-    
+
+    # Przycisk demo — pozwala rekruterom przetestować aplikację "na szybko",
+    # bez konieczności przygotowywania i wgrywania własnych plików PDF.
+    st.button(
+        "🚀 Użyj przykładowego sylabusa (Demo)",
+        key="demo_btn",
+        use_container_width=True,
+        on_click=_use_demo_syllabus,
+    )
+
     st.markdown("---")
     analizuj_btn = st.button("🚀 Generuj Raport Gotowości", type="primary", use_container_width=True)
 
@@ -227,12 +333,19 @@ tab_raport, tab_plan = st.tabs(["📊 Raport Gotowości", "🗓️ Zaplanuj Nauk
 # --- GŁÓWNA LOGIKA PO KLIKNIĘCIU (RAPORT GOTOWOŚCI) ---
 with tab_raport:
     if analizuj_btn:
-        if not uploaded_files:
-            st.error("⚠️ Musisz wgrać przynajmniej jeden plik PDF z sylabusem, aby rozpocząć analizę!")
+        # Analiza jest możliwa, jeśli użytkownik WGRAŁ własny plik PDF LUB kliknął
+        # przycisk demo (wtedy w session_state czeka gotowy tekst przykładowego sylabusa).
+        demo_raw_text = st.session_state.get("raw_text")
+        if not uploaded_files and not demo_raw_text:
+            st.error(
+                "⚠️ Musisz wgrać przynajmniej jeden plik PDF z sylabusem lub kliknąć "
+                "**🚀 Użyj przykładowego sylabusa (Demo)**, aby rozpocząć analizę!"
+            )
         else:
             with st.spinner("Czytam pliki PDF i ekstrakcję wiedzy... To może chwilę potrwać."):
-                # 1. Wyciągamy surowy tekst z wrzuconych PDF-ów
-                raw_text = process_uploaded_pdfs(uploaded_files)
+                # 1. Wyciągamy surowy tekst: wgrane pliki PDF mają priorytet nad tekstem
+                #    demo (który mógł zostać ustawiony wcześniej przyciskiem "Demo").
+                raw_text = process_uploaded_pdfs(uploaded_files) if uploaded_files else demo_raw_text
 
                 # 2. Filtracja tekstu na czyste skille (Krok 1B)
                 uni_skills = extract_skills_with_ai(raw_text)
