@@ -4,12 +4,12 @@ import json
 import re
 from datetime import date, datetime
 from openai import OpenAI
-import pdfplumber
 import plotly.express as px
 import pandas as pd
 from market_scraper import get_market_requirements
 from solidjobs_client import get_market_requirements_solidjobs
 from database import save_analysis, get_analysis_history, get_latest_gaps
+from engine import extract_text_from_pdf, load_demo_syllabuses
 
 # Konfiguracja
 st.set_page_config(page_title="Career Pathfinder AI", page_icon="🎯", layout="wide")
@@ -20,19 +20,18 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 # ---- NOWA FUNKCJA: Przetwarzanie plików w locie ----
 def process_uploaded_pdfs(uploaded_files):
-    all_text = ""
+    all_text = []
     for file in uploaded_files:
         try:
-            # Streamlit przetrzymuje pliki w pamięci jako bajty. 
-            # Pdfplumber radzi z tym sobie bezbłędnie.
-            with pdfplumber.open(file) as pdf:
-                for page in pdf.pages:
-                    text = page.extract_text()
-                    if text:
-                        all_text += text + "\n"
+            # Streamlit przetrzymuje pliki w pamięci jako bajty - `extract_text_from_pdf`
+            # (silnik ekstrakcji z engine.py) radzi sobie z tym bezbłędnie, tak samo jak
+            # ze ścieżkami plików na dysku (patrz `load_demo_syllabuses`).
+            text = extract_text_from_pdf(file)
+            if text:
+                all_text.append(text)
         except Exception as e:
             st.warning(f"Nie udało się odczytać pliku {file.name}: {e}")
-    return all_text
+    return "\n".join(all_text)
 
 def extract_skills_with_ai(text):
     prompt = f"""
@@ -171,6 +170,39 @@ def _clear_report_state():
     st.session_state.pop("report_data", None)
 
 
+def _clear_uploaded_state():
+    """
+    Wywoływane, gdy zmieni się zestaw plików w `st.file_uploader` (nowy upload
+    lub usunięcie pliku). Nowy zestaw PDF-ów oznacza nowe źródło danych, więc
+    czyścimy nieaktualny raport ORAZ ewentualny tekst demo wczytany wcześniej
+    przyciskiem "Demo" — inaczej po usunięciu wgranych plików aplikacja mogłaby
+    w kolejnym przebiegu "wskrzesić" stary tekst demo i zdezorientować użytkownika.
+    """
+    _clear_report_state()
+    st.session_state.pop("raw_text", None)
+
+
+def _load_demo_syllabuses():
+    """
+    Obsługa przycisku "🚀 Użyj przykładowego sylabusa (Demo)".
+
+    Skanuje folder `data/` w głównym katalogu projektu, wyciąga surowy tekst
+    z wszystkich znalezionych sylabusów (PDF/TXT) za pomocą silnika z
+    `engine.py` i zapisuje go w `st.session_state["raw_text"]` — dokładnie tak,
+    jakby użytkownik wgrał własne pliki. Stary raport gotowości (policzony dla
+    poprzednich danych wejściowych) jest przy tym czyszczony, żeby wymusić jego
+    ponowne wygenerowanie pod nowe, demonstracyjne dane.
+    """
+    demo_text = load_demo_syllabuses()
+    if not demo_text:
+        st.sidebar.warning("⚠️ Nie znaleziono żadnych sylabusów (.pdf/.txt) w folderze data/.")
+        return
+
+    st.session_state["raw_text"] = demo_text
+    _clear_report_state()
+    st.sidebar.success("✅ Wczytano przykładowe sylabusy! Kliknij **Generuj Raport Gotowości**, aby zobaczyć wynik.")
+
+
 def _clear_generated_state():
     """
     Usuwa z session_state ZARÓWNO raport gotowości, JAK i wygenerowany plan
@@ -214,10 +246,19 @@ with st.sidebar:
         accept_multiple_files=True,
         key="pdf_uploader",
         # Nowy zestaw PDF-ów = nowy profil kandydata, więc stary raport (policzony
-        # na podstawie poprzednich plików) trzeba wymusić do przeliczenia.
-        on_change=_clear_report_state,
+        # na podstawie poprzednich plików) trzeba wymusić do przeliczenia - a jeśli
+        # wcześniej było wczytane demo, ono również przestaje być aktualne.
+        on_change=_clear_uploaded_state,
     )
-    
+
+    # Alternatywa dla własnych PDF-ów: jednym kliknięciem wczytuje przykładowe
+    # sylabusy z folderu data/ w głównym katalogu projektu (patrz `_load_demo_syllabuses`).
+    st.button(
+        "🚀 Użyj przykładowego sylabusa (Demo)",
+        use_container_width=True,
+        on_click=_load_demo_syllabuses,
+    )
+
     st.markdown("---")
     analizuj_btn = st.button("🚀 Generuj Raport Gotowości", type="primary", use_container_width=True)
 
@@ -227,25 +268,35 @@ tab_raport, tab_plan = st.tabs(["📊 Raport Gotowości", "🗓️ Zaplanuj Nauk
 # --- GŁÓWNA LOGIKA PO KLIKNIĘCIU (RAPORT GOTOWOŚCI) ---
 with tab_raport:
     if analizuj_btn:
-        if not uploaded_files:
-            st.error("⚠️ Musisz wgrać przynajmniej jeden plik PDF z sylabusem, aby rozpocząć analizę!")
-        else:
+        # Źródło surowego tekstu sylabusów: świeżo wgrane PDF-y mają priorytet
+        # (są bardziej "aktualną" intencją użytkownika); jeśli ich nie ma, ale
+        # wcześniej wczytano tekst demo (przycisk "Demo" w sidebarze), używamy go.
+        # Dzięki temu ta sama pętla generująca raport odpala się w OBU przypadkach.
+        if uploaded_files:
             with st.spinner("Czytam pliki PDF i ekstrakcję wiedzy... To może chwilę potrwać."):
-                # 1. Wyciągamy surowy tekst z wrzuconych PDF-ów
                 raw_text = process_uploaded_pdfs(uploaded_files)
+        else:
+            raw_text = st.session_state.get("raw_text")
 
-                # 2. Filtracja tekstu na czyste skille (Krok 1B)
+        if not raw_text:
+            st.error(
+                "⚠️ Musisz wgrać przynajmniej jeden plik PDF z sylabusem lub kliknąć "
+                "**🚀 Użyj przykładowego sylabusa (Demo)**, aby rozpocząć analizę!"
+            )
+        else:
+            with st.spinner("Ekstrakcja wiedzy z sylabusów... To może chwilę potrwać."):
+                # Filtracja surowego tekstu na czyste skille (Krok 1B)
                 uni_skills = extract_skills_with_ai(raw_text)
 
             with st.spinner(f"Trwa skanowanie rynku i zderzenie kompetencji dla: {stanowisko}..."):
-                # 3. Pobranie żywych danych o rynku dla WYBRANEGO stanowiska,
-                #    z wybranego przez użytkownika źródła.
+                # Pobranie żywych danych o rynku dla WYBRANEGO stanowiska,
+                # z wybranego przez użytkownika źródła.
                 if st.session_state["market_source"] == "SolidJobs (API)":
                     market_data = get_market_requirements_solidjobs(stanowisko)
                 else:
                     market_data = get_market_requirements(stanowisko)
 
-                # 4. Ostateczna analiza (Silnik AI)
+                # Ostateczna analiza (Silnik AI)
                 final_prompt = f"""
                 Jesteś Senior Inżynierem IT i analitycznym mentorem technicznym z wieloletnim doświadczeniem
                 w rekrutacji i wdrażaniu kandydatów na stanowisko: {stanowisko}. Rozmawiasz z kandydatem, który
