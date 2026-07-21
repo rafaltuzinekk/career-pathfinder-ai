@@ -10,6 +10,7 @@ import pandas as pd
 from market_scraper import get_market_requirements
 from solidjobs_client import get_market_requirements_solidjobs
 from database import save_analysis, get_analysis_history, get_latest_gaps
+from engine import extract_text_from_pdf, extract_text_from_txt
 
 # Konfiguracja
 st.set_page_config(page_title="Career Pathfinder AI", page_icon="🎯", layout="wide")
@@ -17,6 +18,36 @@ from dotenv import load_dotenv
 load_dotenv()
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+# ---- DANE DEMO: folder z przykładowymi sylabusami (kierunek Informatyka i Ekonometria) ----
+# Pozwala rekruterom przetestować aplikację "jednym kliknięciem", bez konieczności
+# przygotowywania i wgrywania własnych plików PDF - czytamy realne pliki z `data/`.
+DEMO_DATA_DIR = "data"
+
+def _load_demo_syllabus_text():
+    """
+    Wczytuje zawartość plików sylabusów z folderu `data/` (obsługuje rozszerzenia
+    .pdf oraz .txt), używając odpowiedniej funkcji ekstrakcji tekstu z `engine.py`
+    w zależności od formatu pliku, i łączy je w jeden ciąg tekstowy - analogicznie
+    do tego, jak `process_uploaded_pdfs` robi to dla plików wgranych przez użytkownika.
+
+    Returns:
+        Połączony tekst wszystkich znalezionych plików (pusty string, jeśli folder
+        nie istnieje albo nie zawiera żadnych plików .pdf/.txt).
+    """
+    if not os.path.isdir(DEMO_DATA_DIR):
+        return ""
+
+    all_text = ""
+    for filename in sorted(os.listdir(DEMO_DATA_DIR)):
+        file_path = os.path.join(DEMO_DATA_DIR, filename)
+        lower_name = filename.lower()
+        if lower_name.endswith(".pdf"):
+            all_text += extract_text_from_pdf(file_path) + "\n"
+        elif lower_name.endswith(".txt"):
+            all_text += extract_text_from_txt(file_path) + "\n"
+
+    return all_text.strip()
 
 # ---- NOWA FUNKCJA: Przetwarzanie plików w locie ----
 def process_uploaded_pdfs(uploaded_files):
@@ -181,6 +212,45 @@ def _clear_generated_state():
     _clear_report_state()
     st.session_state.pop("study_plan_data", None)
 
+
+def _clear_demo_state():
+    """
+    Usuwa z session_state przykładowy tekst sylabusa wczytany przyciskiem Demo.
+
+    Wywoływane, gdy użytkownik zaczyna wgrywać własne pliki PDF — od tego
+    momentu to one mają być źródłem danych, a nie tekst demo.
+    """
+    st.session_state.pop("raw_text", None)
+
+
+def _on_pdf_upload_change():
+    """Reaguje na wgranie nowego zestawu PDF-ów: unieważnia stary raport
+    i porzuca ewentualny tekst demo, bo to wgrane pliki mają teraz priorytet."""
+    _clear_report_state()
+    _clear_demo_state()
+
+
+def _use_demo_syllabus():
+    """
+    Wczytuje realne pliki sylabusów z folderu `data/` (patrz `_load_demo_syllabus_text`)
+    i zapisuje wynik w session_state, żeby rekruter mógł przetestować aplikację
+    bez wgrywania własnych plików PDF.
+
+    Tak jak przy wgraniu nowych plików PDF, czyścimy stary raport gotowości —
+    inaczej użytkownik zobaczyłby raport policzony dla poprzednich danych.
+    """
+    demo_text = _load_demo_syllabus_text()
+    if demo_text:
+        st.session_state["raw_text"] = demo_text
+        st.session_state.pop("demo_load_error", None)
+    else:
+        _clear_demo_state()
+        st.session_state["demo_load_error"] = (
+            f"⚠️ Nie znaleziono żadnych plików .pdf/.txt w folderze '{DEMO_DATA_DIR}/', "
+            "z których można wczytać przykładowy sylabus."
+        )
+    _clear_report_state()
+
 # --- INTERFEJS (FRONT-END) ---
 st.title("🎯 Career Pathfinder AI")
 st.markdown("Zderz swoją wiedzę ze studiów z realnymi wymaganiami rynku pracy.")
@@ -214,10 +284,23 @@ with st.sidebar:
         accept_multiple_files=True,
         key="pdf_uploader",
         # Nowy zestaw PDF-ów = nowy profil kandydata, więc stary raport (policzony
-        # na podstawie poprzednich plików) trzeba wymusić do przeliczenia.
-        on_change=_clear_report_state,
+        # na podstawie poprzednich plików) trzeba wymusić do przeliczenia, a ewentualny
+        # tekst demo trzeba porzucić — od teraz priorytet mają wgrane pliki.
+        on_change=_on_pdf_upload_change,
     )
-    
+
+    # Przycisk demo — pozwala rekruterom przetestować aplikację "na szybko",
+    # bez konieczności przygotowywania i wgrywania własnych plików PDF (czyta
+    # realne sylabusy z folderu `data/`).
+    st.button(
+        "🚀 Użyj przykładowego sylabusa (Demo)",
+        key="demo_btn",
+        use_container_width=True,
+        on_click=_use_demo_syllabus,
+    )
+    if st.session_state.get("demo_load_error"):
+        st.warning(st.session_state["demo_load_error"])
+
     st.markdown("---")
     analizuj_btn = st.button("🚀 Generuj Raport Gotowości", type="primary", use_container_width=True)
 
@@ -227,12 +310,19 @@ tab_raport, tab_plan = st.tabs(["📊 Raport Gotowości", "🗓️ Zaplanuj Nauk
 # --- GŁÓWNA LOGIKA PO KLIKNIĘCIU (RAPORT GOTOWOŚCI) ---
 with tab_raport:
     if analizuj_btn:
-        if not uploaded_files:
-            st.error("⚠️ Musisz wgrać przynajmniej jeden plik PDF z sylabusem, aby rozpocząć analizę!")
+        # Analiza jest możliwa, jeśli użytkownik WGRAŁ własny plik PDF LUB kliknął
+        # przycisk demo (wtedy w session_state czeka gotowy tekst przykładowego sylabusa).
+        demo_raw_text = st.session_state.get("raw_text")
+        if not uploaded_files and not demo_raw_text:
+            st.error(
+                "⚠️ Musisz wgrać przynajmniej jeden plik PDF z sylabusem lub kliknąć "
+                "**🚀 Użyj przykładowego sylabusa (Demo)**, aby rozpocząć analizę!"
+            )
         else:
             with st.spinner("Czytam pliki PDF i ekstrakcję wiedzy... To może chwilę potrwać."):
-                # 1. Wyciągamy surowy tekst z wrzuconych PDF-ów
-                raw_text = process_uploaded_pdfs(uploaded_files)
+                # 1. Wyciągamy surowy tekst: wgrane pliki PDF mają priorytet nad tekstem
+                #    demo (który mógł zostać ustawiony wcześniej przyciskiem "Demo").
+                raw_text = process_uploaded_pdfs(uploaded_files) if uploaded_files else demo_raw_text
 
                 # 2. Filtracja tekstu na czyste skille (Krok 1B)
                 uni_skills = extract_skills_with_ai(raw_text)
