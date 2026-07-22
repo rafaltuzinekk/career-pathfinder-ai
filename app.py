@@ -134,6 +134,27 @@ def render_report_section(data):
     st.success("Analiza zakończona! ✅")
     st.markdown(f"### 📊 Raport dla: {data['stanowisko']}")
 
+    # --- Wskaźniki KPI: szybkie podsumowanie analizy dla rekrutera/kandydata ---
+    market_data = data.get("market_data") or {}
+    try:
+        # `total_offers_analyzed` to prawdziwa liczba ofert z API/scrapera (patrz
+        # `solidjobs_client`/`market_scraper`) - dokładniejsza niż len() na samym
+        # słowniku market_data. Jeśli jej nie ma, liczymy liczbę przeanalizowanych
+        # technologii jako sensowny substytut.
+        oferty_count = market_data.get("total_offers_analyzed")
+        if oferty_count is None:
+            oferty_count = len(market_data.get("required_skills", {}))
+    except Exception:
+        oferty_count = 0
+
+    kpi_col1, kpi_col2, kpi_col3 = st.columns(3)
+    with kpi_col1:
+        st.metric(label="Przeanalizowane oferty", value=oferty_count)
+    with kpi_col2:
+        st.metric(label="Analiza AI", value="Ukończona")
+    with kpi_col3:
+        st.metric(label="Status Profilu", value="Wygenerowano")
+
     col1, col2 = st.columns([1, 1])
     with col1:
         st.info(data["display_report"])
@@ -272,32 +293,54 @@ with tab_raport:
         # (są bardziej "aktualną" intencją użytkownika); jeśli ich nie ma, ale
         # wcześniej wczytano tekst demo (przycisk "Demo" w sidebarze), używamy go.
         # Dzięki temu ta sama pętla generująca raport odpala się w OBU przypadkach.
-        if uploaded_files:
-            with st.spinner("Czytam pliki PDF i ekstrakcję wiedzy... To może chwilę potrwać."):
-                raw_text = process_uploaded_pdfs(uploaded_files)
-        else:
+        if not uploaded_files:
             raw_text = st.session_state.get("raw_text")
+        else:
+            # Jeszcze nieznane w tym momencie - wyodrębniamy je dalej, wewnątrz
+            # loading screena (`st.status`), gdzie użytkownik zobaczy ten krok.
+            raw_text = None
 
-        if not raw_text:
+        if not uploaded_files and not raw_text:
             st.error(
                 "⚠️ Musisz wgrać przynajmniej jeden plik PDF z sylabusem lub kliknąć "
                 "**🚀 Użyj przykładowego sylabusa (Demo)**, aby rozpocząć analizę!"
             )
         else:
-            with st.spinner("Ekstrakcja wiedzy z sylabusów... To może chwilę potrwać."):
-                # Filtracja surowego tekstu na czyste skille (Krok 1B)
-                uni_skills = extract_skills_with_ai(raw_text)
+            # Nowoczesny, interaktywny loading screen: zamiast pojedynczego,
+            # "ślepego" spinnera pokazujemy użytkownikowi krok po kroku, co
+            # dokładnie dzieje się "pod maską" (ekstrakcja PDF, skanowanie rynku,
+            # zapytanie do OpenAI) - profesjonalny wygląd dla technicznych rekruterów.
+            with st.status("🔍 Rozpoczynam analizę rynku i dokumentów...", expanded=True) as status:
+                if uploaded_files:
+                    st.write("📄 Przetwarzanie dokumentów PDF...")
+                    raw_text = process_uploaded_pdfs(uploaded_files)
 
-            with st.spinner(f"Trwa skanowanie rynku i zderzenie kompetencji dla: {stanowisko}..."):
-                # Pobranie żywych danych o rynku dla WYBRANEGO stanowiska,
-                # z wybranego przez użytkownika źródła.
-                if st.session_state["market_source"] == "SolidJobs (API)":
-                    market_data = get_market_requirements_solidjobs(stanowisko)
+                if not raw_text:
+                    status.update(
+                        label="❌ Analiza nieudana - brak treści w plikach.",
+                        state="error",
+                        expanded=True,
+                    )
+                    st.error(
+                        "⚠️ Nie udało się wyodrębnić tekstu z wgranych plików PDF. "
+                        "Sprawdź, czy pliki nie są uszkodzone lub nie są puste."
+                    )
                 else:
-                    market_data = get_market_requirements(stanowisko)
+                    st.write("📄 Ekstrakcja wiedzy z sylabusów (AI)...")
+                    # Filtracja surowego tekstu na czyste skille (Krok 1B)
+                    uni_skills = extract_skills_with_ai(raw_text)
 
-                # Ostateczna analiza (Silnik AI)
-                final_prompt = f"""
+                    st.write("📥 Pobieranie ofert pracy...")
+                    # Pobranie żywych danych o rynku dla WYBRANEGO stanowiska,
+                    # z wybranego przez użytkownika źródła.
+                    if st.session_state["market_source"] == "SolidJobs (API)":
+                        market_data = get_market_requirements_solidjobs(stanowisko)
+                    else:
+                        market_data = get_market_requirements(stanowisko)
+
+                    st.write("🧠 AI generuje ścieżkę rozwoju...")
+                    # Ostateczna analiza (Silnik AI)
+                    final_prompt = f"""
                 Jesteś Senior Inżynierem IT i analitycznym mentorem technicznym z wieloletnim doświadczeniem
                 w rekrutacji i wdrażaniu kandydatów na stanowisko: {stanowisko}. Rozmawiasz z kandydatem, który
                 dopiero wchodzi na rynek - Twoim celem NIE jest sucha lista "plusy/minusy", a merytoryczny,
@@ -345,38 +388,46 @@ with tab_raport:
                 "Co musisz doszlifować".
                 """
 
-                response = client.chat.completions.create(
-                    model="gpt-4o-mini",
-                    messages=[{"role": "user", "content": final_prompt}],
-                    temperature=0.1
-                )
-
-                # Wyciągamy z odpowiedzi czysty tekst dla użytkownika + dane do historii (po cichu, w tle)
-                display_report, readiness_score, missing_skills = parse_ai_report(
-                    response.choices[0].message.content
-                )
-
-                try:
-                    save_analysis(
-                        job_title=stanowisko,
-                        readiness_score=readiness_score,
-                        gaps=missing_skills,
+                    response = client.chat.completions.create(
+                        model="gpt-4o-mini",
+                        messages=[{"role": "user", "content": final_prompt}],
+                        temperature=0.1
                     )
-                except Exception:
-                    # Historia to funkcja "nice to have" - awaria bazy nie może wywalić raportu użytkownikowi.
-                    pass
 
-                # Zapisujemy wynik w session_state (a nie tylko renderujemy "tu i teraz"),
-                # żeby raport PRZETRWAŁ kolejne przeładowania skryptu - np. wywołane
-                # kliknięciem przycisku w zakładce "Zaplanuj Naukę" (Streamlit odpala
-                # skrypt od nowa, a `analizuj_btn` wraca do False, więc bez tego stanu
-                # ten blok w ogóle by się nie wykonał i raport zniknąłby z ekranu).
-                st.session_state["report_data"] = {
-                    "stanowisko": stanowisko,
-                    "display_report": display_report,
-                    "market_data": market_data,
-                    "uni_skills": uni_skills,
-                }
+                    # Wyciągamy z odpowiedzi czysty tekst dla użytkownika + dane do historii (po cichu, w tle)
+                    display_report, readiness_score, missing_skills = parse_ai_report(
+                        response.choices[0].message.content
+                    )
+
+                    try:
+                        save_analysis(
+                            job_title=stanowisko,
+                            readiness_score=readiness_score,
+                            gaps=missing_skills,
+                        )
+                    except Exception:
+                        # Historia to funkcja "nice to have" - awaria bazy nie może wywalić raportu użytkownikowi.
+                        pass
+
+                    # Zapisujemy wynik w session_state (a nie tylko renderujemy "tu i teraz"),
+                    # żeby raport PRZETRWAŁ kolejne przeładowania skryptu - np. wywołane
+                    # kliknięciem przycisku w zakładce "Zaplanuj Naukę" (Streamlit odpala
+                    # skrypt od nowa, a `analizuj_btn` wraca do False, więc bez tego stanu
+                    # ten blok w ogóle by się nie wykonał i raport zniknąłby z ekranu).
+                    st.session_state["report_data"] = {
+                        "stanowisko": stanowisko,
+                        "display_report": display_report,
+                        "market_data": market_data,
+                        "uni_skills": uni_skills,
+                    }
+
+                    # Zamykamy loading screen z jasnym komunikatem sukcesu i zwijamy go,
+                    # żeby nie zajmował miejsca po zakończeniu analizy.
+                    status.update(
+                        label="Analiza zakończona sukcesem!",
+                        state="complete",
+                        expanded=False,
+                    )
 
     # Renderujemy raport NIEZALEŻNIE od tego, czy przycisk został kliknięty w TYM
     # przebiegu skryptu - liczy się tylko to, czy mamy aktualne dane w session_state
